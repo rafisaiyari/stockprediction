@@ -1,23 +1,39 @@
-import React, { useState } from 'react';
-import { TrendingUp, TrendingDown, Activity, BarChart3, Settings, Bell } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { TrendingUp, TrendingDown, Activity, BarChart3, Settings, Bell, ZoomOut, ZoomIn, RotateCcw } from 'lucide-react';
 
 const StockPredictionApp = () => {
   const [historicalView, setHistoricalView] = useState(true);
   const [predictionView, setPredictionView] = useState(true);
   const [autoTrading, setAutoTrading] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+  const svgRef = useRef(null);
 
-  // Mock candlestick data
+  // Generate more comprehensive candlestick data
   const generateCandlestickData = () => {
     const data = [];
     let price = 150;
-    for (let i = 0; i < 50; i++) {
-      const change = (Math.random() - 0.5) * 10;
+    for (let i = 0; i < 100; i++) {
+      const volatility = 0.02 + Math.random() * 0.03; // 2-5% volatility
+      const trend = Math.sin(i * 0.1) * 0.001; // Slight trending
+      const change = (Math.random() - 0.5) * price * volatility + price * trend;
+      
       const open = price;
       const close = price + change;
-      const high = Math.max(open, close) + Math.random() * 5;
-      const low = Math.min(open, close) - Math.random() * 5;
+      const spread = Math.abs(change) * (0.5 + Math.random());
+      const high = Math.max(open, close) + spread * Math.random();
+      const low = Math.min(open, close) - spread * Math.random();
       
-      data.push({ open, high, low, close, bullish: close > open });
+      data.push({ 
+        open: Math.round(open * 100) / 100, 
+        high: Math.round(high * 100) / 100, 
+        low: Math.round(low * 100) / 100, 
+        close: Math.round(close * 100) / 100, 
+        bullish: close > open,
+        volume: Math.floor(Math.random() * 1000000) + 100000
+      });
       price = close;
     }
     return data;
@@ -25,37 +41,58 @@ const StockPredictionApp = () => {
 
   const candlestickData = generateCandlestickData();
 
-  const Candlestick = ({ data, width = 8, index }) => {
+  // Calculate price range for scaling
+  const priceRange = candlestickData.reduce(
+    (range, candle) => ({
+      min: Math.min(range.min, candle.low),
+      max: Math.max(range.max, candle.high)
+    }),
+    { min: Infinity, max: -Infinity }
+  );
+
+  const chartHeight = 400;
+  const chartWidth = 800;
+  const candleWidth = 8;
+  const candleSpacing = 12;
+
+  // Scale price to chart coordinates
+  const priceToY = (price) => {
+    const padding = (priceRange.max - priceRange.min) * 0.1;
+    const adjustedMin = priceRange.min - padding;
+    const adjustedMax = priceRange.max + padding;
+    return chartHeight - ((price - adjustedMin) / (adjustedMax - adjustedMin)) * chartHeight;
+  };
+
+  const Candlestick = ({ data, index }) => {
     const { open, high, low, close, bullish } = data;
-    const bodyHeight = Math.abs(close - open) * 3;
-    const wickTop = high - Math.max(open, close);
-    const wickBottom = Math.min(open, close) - low;
+    const x = index * candleSpacing;
+    
+    const openY = priceToY(open);
+    const closeY = priceToY(close);
+    const highY = priceToY(high);
+    const lowY = priceToY(low);
+    
+    const bodyHeight = Math.abs(closeY - openY);
+    const bodyY = Math.min(openY, closeY);
     
     return (
-      <g transform={`translate(${index * (width + 2)}, 200)`}>
-        {/* Upper wick */}
+      <g>
+        {/* Wick */}
         <line
-          x1={width / 2}
-          y1={-wickTop * 3}
-          x2={width / 2}
-          y2={0}
+          x1={x + candleWidth / 2}
+          y1={highY}
+          x2={x + candleWidth / 2}
+          y2={lowY}
           stroke={bullish ? '#10b981' : '#ef4444'}
-          strokeWidth="1"
+          strokeWidth="2"
         />
         {/* Body */}
         <rect
-          x="0"
-          y={bullish ? -bodyHeight : 0}
-          width={width}
-          height={bodyHeight}
+          x={x}
+          y={bodyY}
+          width={candleWidth}
+          height={Math.max(bodyHeight, 1)}
           fill={bullish ? '#10b981' : '#ef4444'}
-        />
-        {/* Lower wick */}
-        <line
-          x1={width / 2}
-          y1={bullish ? 0 : bodyHeight}
-          x2={width / 2}
-          y2={bullish ? wickBottom * 3 : bodyHeight + wickBottom * 3}
           stroke={bullish ? '#10b981' : '#ef4444'}
           strokeWidth="1"
         />
@@ -63,18 +100,65 @@ const StockPredictionApp = () => {
     );
   };
 
+  const handleMouseDown = (e) => {
+    setIsDragging(true);
+    setLastMousePos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleMouseMove = (e) => {
+    if (isDragging) {
+      const deltaX = e.clientX - lastMousePos.x;
+      const deltaY = e.clientY - lastMousePos.y;
+      setPan(prev => ({
+        x: prev.x + deltaX / zoom,
+        y: prev.y + deltaY / zoom
+      }));
+      setLastMousePos({ x: e.clientX, y: e.clientY });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  const handleWheel = (e) => {
+    e.preventDefault();
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom(prev => Math.max(0.5, Math.min(5, prev * zoomFactor)));
+  };
+
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (svg) {
+      svg.addEventListener('wheel', handleWheel, { passive: false });
+      return () => svg.removeEventListener('wheel', handleWheel);
+    }
+  }, []);
+
   const PerformanceCard = ({ title, value, change, isPositive }) => (
-    <div className="bg-slate-700 rounded-xl p-4 flex items-center justify-between">
-      <div>
-        <p className="text-slate-400 text-sm">{title}</p>
-        <p className="text-white text-xl font-semibold">{value}</p>
-      </div>
-      <div className={`flex items-center ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-        {isPositive ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
-        <span className="ml-1 text-sm">{change}</span>
+    <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-slate-400 text-sm font-medium">{title}</p>
+          <p className="text-white text-2xl font-bold mt-1">{value}</p>
+        </div>
+        <div className={`flex items-center ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
+          {isPositive ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
+          <span className="ml-2 text-lg font-semibold">{change}</span>
+        </div>
       </div>
     </div>
   );
+
+  const currentPrice = candlestickData[candlestickData.length - 1]?.close || 0;
+  const previousPrice = candlestickData[candlestickData.length - 2]?.close || 0;
+  const priceChange = currentPrice - previousPrice;
+  const percentChange = ((priceChange / previousPrice) * 100).toFixed(2);
 
   return (
     <div className="h-screen bg-slate-800 text-white flex flex-col overflow-hidden">
@@ -88,9 +172,6 @@ const StockPredictionApp = () => {
             <button className="text-slate-400 hover:text-white">Model</button>
             <button className="text-slate-400 hover:text-white">About Us</button>
           </nav>
-          <button className="bg-emerald-500 hover:bg-emerald-600 px-6 py-2 rounded-lg">
-            Login
-          </button>
         </div>
       </header>
 
@@ -159,38 +240,161 @@ const StockPredictionApp = () => {
 
         {/* Main Content */}
         <div className="flex-1 p-6 space-y-6 flex flex-col overflow-hidden">
-          {/* Chart Header */}
-          <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">PRICE ANALYSIS AND PREDICTIONS</h1>
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={historicalView}
-                  onChange={(e) => setHistoricalView(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm">HISTORICAL</span>
-              </label>
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={predictionView}
-                  onChange={(e) => setPredictionView(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm">PREDICTION</span>
-              </label>
+          {/* Chart Controls */}
+          <div className="bg-slate-800 rounded-xl p-6 mb-6 border border-slate-700">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <h2 className="text-2xl font-bold">PRICE ANALYSIS AND PREDICTIONS</h2>
+              
+              <div className="flex items-center space-x-6">
+                {/* View Controls */}
+                <div className="flex items-center space-x-4">
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={historicalView}
+                      onChange={(e) => setHistoricalView(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-emerald-500"
+                    />
+                    <span className="text-sm font-medium">HISTORICAL</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={predictionView}
+                      onChange={(e) => setPredictionView(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500"
+                    />
+                    <span className="text-sm font-medium">PREDICTION</span>
+                  </label>
+                </div>
+
+                {/* Zoom Controls */}
+                <div className="flex items-center space-x-2 bg-slate-700 rounded-lg p-2">
+                  <button
+                    onClick={() => setZoom(prev => Math.max(0.5, prev * 0.8))}
+                    className="p-2 hover:bg-slate-600 rounded transition-colors"
+                    title="Zoom Out"
+                  >
+                    <ZoomOut size={16} />
+                  </button>
+                  <span className="px-2 text-sm font-mono">{(zoom * 100).toFixed(0)}%</span>
+                  <button
+                    onClick={() => setZoom(prev => Math.min(5, prev * 1.25))}
+                    className="p-2 hover:bg-slate-600 rounded transition-colors"
+                    title="Zoom In"
+                  >
+                    <ZoomIn size={16} />
+                  </button>
+                  <button
+                    onClick={resetView}
+                    className="p-2 hover:bg-slate-600 rounded transition-colors ml-2"
+                    title="Reset View"
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Chart Area */}
-          <div className="bg-slate-900 rounded-xl p-6 flex-1 min-h-0">
-            <svg width="100%" height="100%" viewBox="0 0 800 300" className="w-full h-full">
-              {candlestickData.map((data, index) => (
-                <Candlestick key={index} data={data} index={index} />
-              ))}
-            </svg>
+          {/* Interactive Chart */}
+          <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 flex-1 flex flex-col">
+            <div className="relative overflow-hidden rounded-lg bg-slate-900 border border-slate-600 flex-1">
+              <svg
+                ref={svgRef}
+                width="100%"
+                height={chartHeight + 100}
+                viewBox={`0 0 ${chartWidth} ${chartHeight + 100}`}
+                className="cursor-move"
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+              >
+                <defs>
+                  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#334155" strokeWidth="1" opacity="0.3"/>
+                  </pattern>
+                </defs>
+                
+                {/* Grid */}
+                <rect width="100%" height="100%" fill="url(#grid)" />
+                
+                {/* Chart Group with Transform */}
+                <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+                  {/* Price Grid Lines */}
+                  {[0.2, 0.4, 0.6, 0.8].map((ratio) => {
+                    const price = priceRange.min + (priceRange.max - priceRange.min) * ratio;
+                    const y = priceToY(price);
+                    return (
+                      <g key={ratio}>
+                        <line
+                          x1="0"
+                          y1={y}
+                          x2={candlestickData.length * candleSpacing}
+                          y2={y}
+                          stroke="#475569"
+                          strokeWidth="1"
+                          opacity="0.5"
+                          strokeDasharray="5,5"
+                        />
+                        <text
+                          x="5"
+                          y={y - 5}
+                          fill="#94a3b8"
+                          fontSize="12"
+                          fontFamily="monospace"
+                        >
+                          ${price.toFixed(2)}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  
+                  {/* Candlesticks */}
+                  {historicalView && candlestickData.map((data, index) => (
+                    <Candlestick key={index} data={data} index={index} />
+                  ))}
+                  
+                  {/* Moving Average Line */}
+                  {historicalView && (
+                    <path
+                      d={candlestickData.reduce((path, candle, index) => {
+                        if (index < 10) return path;
+                        const avg = candlestickData.slice(index - 9, index + 1)
+                          .reduce((sum, c) => sum + c.close, 0) / 10;
+                        const x = index * candleSpacing + candleWidth / 2;
+                        const y = priceToY(avg);
+                        return path + (index === 10 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+                      }, '')}
+                      stroke="#f59e0b"
+                      strokeWidth="2"
+                      fill="none"
+                      opacity="0.8"
+                    />
+                  )}
+                </g>
+                
+                {/* Zoom indicator */}
+                <text
+                  x={chartWidth - 100}
+                  y="30"
+                  fill="#94a3b8"
+                  fontSize="12"
+                  fontFamily="monospace"
+                  textAnchor="end"
+                >
+                  Zoom: {(zoom * 100).toFixed(0)}% | Scroll to zoom, drag to pan
+                </text>
+              </svg>
+            </div>
+            
+            <div className="mt-4 text-sm text-slate-400">
+              <p>• Mouse wheel or zoom buttons to zoom in/out</p>
+              <p>• Click and drag to pan around the chart</p>
+              <p>• Yellow line shows 10-period moving average</p>
+            </div>
           </div>
 
           {/* Bottom Section */}
