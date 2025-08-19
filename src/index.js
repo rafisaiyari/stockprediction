@@ -19,9 +19,7 @@ export { default as Sidebar } from './components/Sidebar/Sidebar';
 export { default as PerformanceCard } from './components/Sidebar/PerformanceCard';
 
 // Chart
-export { default as ChartContainer } from './components/Chart/ChartContainer';
-export { default as ChartControls } from './components/Chart/ChartControls';
-export { default as Candlestick } from './components/Chart/Candlestick';
+export { default as CandlestickChart } from './components/Chart/CandlestickChart';
 
 // Dashboard
 export { default as Dashboard } from './components/Dashboard/Dashboard';

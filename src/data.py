@@ -76,21 +76,13 @@ def main():
 
 def fetch_chart_data(symbol, is_crypto=False, days=30):
     ticker = f"{symbol}-USD" if is_crypto else symbol
-    
-    end_date = datetime.now()
-
-    start_date = end_date - timedelta(days=days)
-
-    data = yf.download(ticker, start=start_date.strftime('%Y-%m-%d'), end=end_date.strftime('%Y-%m-%d'), progress=False)
-
+    data = yf.Ticker(ticker).history(period=f"{days}d")
     data = data.reset_index()
-    if len(data) > days:
-        data = data.tail(days)
     return data
 
 def save_chart_data(symbol, data, is_crypto=False):
     """Save data to appropriate CSV file"""
-    folder = 'stockprediction/chart_data/crypto' if is_crypto else 'stockprediction/chart_data/stocks'
+    folder = 'chart_data/crypto' if is_crypto else 'chart_data/stocks'
     os.makedirs(folder, exist_ok=True)
     filepath = f"{folder}/{symbol}.csv"
 
@@ -103,22 +95,14 @@ def main():
     # Crypto symbols
     cryptos = ["ETH", "SOL", "XRP"]
     
-    # Fetch both 7-day and 30-day data for all symbols
+    # Only fetch 30-day data for all symbols
     for symbol in stocks:
         data_30d = fetch_chart_data(symbol, is_crypto=False, days=30)
         save_chart_data(symbol, data_30d, is_crypto=False)
-        
-        # The 7-day data can be extracted from the 30-day data when needed
-        data_7d = data_30d.tail(7)
-        save_chart_data(f"{symbol}_7d", data_7d, is_crypto=False)
     
     for symbol in cryptos:
         data_30d = fetch_chart_data(symbol, is_crypto=True, days=30)
         save_chart_data(symbol, data_30d, is_crypto=True)
-        
-        # The 7-day data can be extracted from the 30-day data when needed
-        data_7d = data_30d.tail(7)
-        save_chart_data(f"{symbol}_7d", data_7d, is_crypto=True)
 
 if __name__ == "__main__":
     main()
